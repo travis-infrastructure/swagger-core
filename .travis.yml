@@ -1,15 +1,7 @@
-sudo: false
+os: osx
+osx_image: xcode9.4
 language: java
 script: ./mvnw clean verify
-jdk:
-  - oraclejdk8
-  - oraclejdk9
-  - oraclejdk9
-after_success:
-  - if [ $SONATYPE_USERNAME ] && [ -z $TRAVIS_TAG ] && [ $TRAVIS_PULL_REQUEST == false ]; then
-      ./mvnw clean deploy --settings .travis/settings.xml;
-    fi;
-branches:
-  only:
-  - master
-  - 1.5
+
+notifications:
+  email: false
