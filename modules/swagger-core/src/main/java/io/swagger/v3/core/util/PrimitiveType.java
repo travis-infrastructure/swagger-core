@@ -18,7 +18,9 @@ import java.lang.reflect.Type;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The <code>PrimitiveType</code> enumeration defines a mapping of limited set
@@ -108,6 +110,12 @@ public enum PrimitiveType {
             return new NumberSchema();
         }
     },
+    NUMBER(Number.class, "number") {
+        @Override
+        public Schema createProperty() {
+            return new NumberSchema();
+        }
+    },
     DATE(DateStub.class, "date") {
         @Override
         public DateSchema createProperty() {
@@ -118,6 +126,12 @@ public enum PrimitiveType {
         @Override
         public DateTimeSchema createProperty() {
             return new DateTimeSchema();
+        }
+    },
+    PARTIAL_TIME(java.time.LocalTime.class, "partial-time") {
+        @Override
+        public Schema createProperty() {
+            return new StringSchema().format("partial-time");
         }
     },
     FILE(java.io.File.class, "file") {
@@ -140,6 +154,31 @@ public enum PrimitiveType {
      * Joda lib.
      */
     private static final Map<String, PrimitiveType> EXTERNAL_CLASSES;
+
+    /**
+     * Allows to exclude specific classes from KEY_CLASSES mappings to primitive
+     * Joda lib.
+     */
+    private static Set<String> customExcludedClasses = new ConcurrentHashMap<String, String>().newKeySet();
+
+    /**
+     * Adds support for custom mapping of classes to primitive types
+     */
+    private static Map<String, PrimitiveType> customClasses = new ConcurrentHashMap<String, PrimitiveType>();
+
+    /**
+     * class qualified names prefixes to be considered as "system" types
+     */
+    private static Set<String> systemPrefixes = new ConcurrentHashMap<String, Boolean>().newKeySet();
+    /**
+     * class qualified names NOT to be considered as "system" types
+     */
+    private static Set<String> nonSystemTypes = new ConcurrentHashMap<String, Boolean>().newKeySet();
+    /**
+     * package names NOT to be considered as "system" types
+     */
+    private static Set<String> nonSystemTypePackages = new ConcurrentHashMap<String, Boolean>().newKeySet();
+
     /**
      * Alternative names for primitive types that have to be supported for
      * backward compatibility.
@@ -151,6 +190,10 @@ public enum PrimitiveType {
     public static final Map<String, String> datatypeMappings;
 
     static {
+        systemPrefixes.add("java.");
+        systemPrefixes.add("javax.");
+        nonSystemTypes.add("java.time.LocalTime");
+
         final Map<String, String> dms = new HashMap<>();
         dms.put("integer_int32", "integer");
         dms.put("integer_", "integer");
@@ -167,8 +210,9 @@ public enum PrimitiveType {
         dms.put("string_uuid", "uuid");
         dms.put("string_date", "date");
         dms.put("string_date-time", "date-time");
+        dms.put("string_partial-time", "partial-time");
         dms.put("string_password", "password");
-        dms.put("boolean", "boolean");
+        dms.put("boolean_", "boolean");
         dms.put("object_", "object");
         datatypeMappings = Collections.unmodifiableMap(dms);
 
@@ -185,6 +229,7 @@ public enum PrimitiveType {
         addKeys(keyClasses, DOUBLE, Double.class, Double.TYPE);
         addKeys(keyClasses, INTEGER, java.math.BigInteger.class);
         addKeys(keyClasses, DECIMAL, java.math.BigDecimal.class);
+        addKeys(keyClasses, NUMBER, Number.class);
         addKeys(keyClasses, DATE, DateStub.class);
         addKeys(keyClasses, DATE_TIME, java.util.Date.class);
         addKeys(keyClasses, FILE, java.io.File.class);
@@ -197,9 +242,9 @@ public enum PrimitiveType {
 
         final Map<String, PrimitiveType> externalClasses = new HashMap<String, PrimitiveType>();
         addKeys(externalClasses, DATE, "org.joda.time.LocalDate", "java.time.LocalDate");
-        addKeys(externalClasses, DATE_TIME, "org.joda.time.DateTime", "org.joda.time.ReadableDateTime",
-                "javax.xml.datatype.XMLGregorianCalendar", "java.time.LocalDateTime", "java.time.ZonedDateTime",
-                "java.time.OffsetDateTime");
+        addKeys(externalClasses, DATE_TIME, "java.time.LocalDateTime", "java.time.ZonedDateTime",
+                "java.time.OffsetDateTime", "javax.xml.datatype.XMLGregorianCalendar", "org.joda.time.LocalDateTime",
+                "org.joda.time.ReadableDateTime", "org.joda.time.DateTime");
         addKeys(externalClasses, LONG, "java.time.Instant");
         EXTERNAL_CLASSES = Collections.unmodifiableMap(externalClasses);
 
@@ -224,16 +269,76 @@ public enum PrimitiveType {
         this.commonName = commonName;
     }
 
+
+    /**
+     * Adds support for custom mapping of classes to primitive types
+     *
+     * @return Map of custom classes to primitive type
+     * @since 2.0.6
+     */
+    public static Set<String> customExcludedClasses() {
+        return customExcludedClasses;
+    }
+
+    /**
+     * Adds support for custom mapping of classes to primitive types
+     *
+     * @return Map of custom classes to primitive type
+     * @since 2.0.6
+     */
+    public static Map<String, PrimitiveType> customClasses() {
+        return customClasses;
+    }
+
+    /**
+     * class qualified names prefixes to be considered as "system" types
+     *
+     * @return Mutable set of class qualified names prefixes to be considered as "system" types
+     * @since 2.0.6
+     */
+    public static Set<String> systemPrefixes() {
+        return systemPrefixes;
+    }
+
+    /**
+     * class qualified names NOT to be considered as "system" types
+     *
+     * @return Mutable set of class qualified names NOT to be considered as "system" types
+     * @since 2.0.6
+     */
+    public static Set<String> nonSystemTypes() {
+        return nonSystemTypes;
+    }
+
+    /**
+     * package names NOT to be considered as "system" types
+     *
+     * @return Mutable set of package names NOT to be considered as "system" types
+     * @since 2.0.6
+     */
+    public static Set<String> nonSystemTypePackages() {
+        return nonSystemTypePackages;
+    }
+
     public static PrimitiveType fromType(Type type) {
         final Class<?> raw = TypeFactory.defaultInstance().constructType(type).getRawClass();
         final PrimitiveType key = KEY_CLASSES.get(raw);
         if (key != null) {
-            return key;
+            if (!customExcludedClasses.contains(raw.getName())) {
+                return key;
+            }
         }
+
+        final PrimitiveType custom = customClasses.get(raw.getName());
+        if (custom != null) {
+            return custom;
+        }
+
         final PrimitiveType external = EXTERNAL_CLASSES.get(raw.getName());
         if (external != null) {
             return external;
         }
+
         for (Map.Entry<Class<?>, PrimitiveType> entry : BASE_CLASSES.entrySet()) {
             if (entry.getKey().isAssignableFrom(raw)) {
                 return entry.getValue();
@@ -294,5 +399,16 @@ public enum PrimitiveType {
     private static class DateStub {
         private DateStub() {
         }
+    }
+
+    /**
+     * Convenience method to map LocalTime to string primitive with rfc3339 format partial-time.
+     * See https://xml2rfc.tools.ietf.org/public/rfc/html/rfc3339.html#anchor14
+     *
+     * @since 2.0.6
+     */
+    public static void enablePartialTime() {
+        customClasses().put("org.joda.time.LocalTime", PrimitiveType.PARTIAL_TIME);
+        customClasses().put("java.time.LocalTime", PrimitiveType.PARTIAL_TIME);
     }
 }

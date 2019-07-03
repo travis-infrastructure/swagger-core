@@ -26,7 +26,7 @@ import java.lang.annotation.Target;
 
 /**
  * The annotation may be used to add one or more examples to the definition of a parameter, request or response content,
- * by definining it as field {@link io.swagger.v3.oas.annotations.Parameter#examples()} or {@link Content#examples()}
+ * by defining it as field {@link io.swagger.v3.oas.annotations.Parameter#examples()} or {@link Content#examples()}
  *
  * @see <a target="_new" href="https://github.com/OAI/OpenAPI-Specification/blob/3.0.1/versions/3.0.1.md#exampleObject">Example (OpenAPI specification)</a>
  **/
@@ -68,5 +68,13 @@ public @interface ExampleObject {
      * @return an optional array of extensions
      */
     Extension[] extensions() default {};
+
+    /**
+     * A reference to a example defined in components examples.
+     *
+     * @since 2.0.3
+     * @return the reference
+     **/
+    String ref() default "";
 
 }

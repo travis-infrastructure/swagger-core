@@ -72,6 +72,11 @@ public class ParameterProcessor {
                 if (p.hidden()) {
                     return null;
                 }
+                if (StringUtils.isNotBlank(p.ref())) {
+                    parameter = new Parameter().$ref(p.ref());
+                    return parameter;
+                }
+
                 if (StringUtils.isNotBlank(p.description())) {
                     parameter.setDescription(p.description());
                 }
@@ -102,8 +107,16 @@ public class ParameterProcessor {
                 }
 
                 Map<String, Example> exampleMap = new HashMap<>();
-                for (ExampleObject exampleObject : p.examples()) {
-                    AnnotationsUtils.getExample(exampleObject).ifPresent(example -> exampleMap.put(exampleObject.name(), example));
+                final Object exampleValue;
+                if (p.examples().length == 1 && StringUtils.isBlank(p.examples()[0].name())) {
+                    Optional<Example> exampleOptional = AnnotationsUtils.getExample(p.examples()[0], true);
+                    if (exampleOptional.isPresent()) {
+                        parameter.setExample(exampleOptional.get());
+                    }
+                } else {
+                    for (ExampleObject exampleObject : p.examples()) {
+                        AnnotationsUtils.getExample(exampleObject).ifPresent(example -> exampleMap.put(exampleObject.name(), example));
+                    }
                 }
                 if (exampleMap.size() > 0) {
                     parameter.setExamples(exampleMap);
@@ -154,7 +167,11 @@ public class ParameterProcessor {
                 } catch (Exception e) {
                     LOGGER.error("failed on " + annotation.annotationType().getName(), e);
                 }
-            } else if (annotation.annotationType().getName().equals("javax.validation.constraints.NotNull")) {
+            } else if (
+                        annotation.annotationType().getName().equals("javax.validation.constraints.NotNull") ||
+                        annotation.annotationType().getName().equals("javax.validation.constraints.NotBlank") ||
+                        annotation.annotationType().getName().equals("javax.validation.constraints.NotEmpty")
+                    ) {
                 parameter.setRequired(true);
             } else if (annotation.annotationType().getName().equals("javax.ws.rs.FormParam")) {
                 try {

@@ -25,7 +25,7 @@ import java.lang.annotation.Target;
 
 /**
  * The annotation may be used to add one or more headers to the definition of a response or as attribute of content
- * encoding by definining it as field {@link io.swagger.v3.oas.annotations.responses.ApiResponse#headers()} or {@link io.swagger.v3.oas.annotations.media.Content#encoding()}.
+ * encoding by defining it as field {@link io.swagger.v3.oas.annotations.responses.ApiResponse#headers()} or {@link io.swagger.v3.oas.annotations.media.Content#encoding()}.
  * <p>Please note that request headers are defined as Header {@link io.swagger.v3.oas.annotations.Parameter}.</p>
  *
  * @see <a target="_new" href="https://github.com/OAI/OpenAPI-Specification/blob/3.0.1/versions/3.0.1.md#headerObject">Header (OpenAPI specification)</a>
@@ -71,5 +71,13 @@ public @interface Header {
      * @return whether or not the header is deprecated
      **/
     boolean deprecated() default false;
+
+    /**
+     * A reference to a header defined in components headers.
+     *
+     * @since 2.0.3
+     * @return the reference
+     **/
+    String ref() default "";
 
 }

@@ -4,12 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.core.converter.AnnotatedType;
 import io.swagger.v3.core.converter.ModelConverter;
 import io.swagger.v3.core.converter.ModelConverterContextImpl;
+import io.swagger.v3.core.converter.ModelConverters;
 import io.swagger.v3.core.filter.AbstractSpecFilter;
 import io.swagger.v3.core.filter.OpenAPISpecFilter;
 import io.swagger.v3.core.filter.SpecFilter;
 import io.swagger.v3.core.jackson.ModelResolver;
 import io.swagger.v3.core.model.ApiDescription;
+import io.swagger.v3.core.util.PrimitiveType;
 import io.swagger.v3.jaxrs2.matchers.SerializationMatchers;
+import io.swagger.v3.jaxrs2.resources.SingleExampleResource;
 import io.swagger.v3.jaxrs2.resources.BasicFieldsResource;
 import io.swagger.v3.jaxrs2.resources.BookStoreTicket2646;
 import io.swagger.v3.jaxrs2.resources.ClassPathParentResource;
@@ -23,14 +26,26 @@ import io.swagger.v3.jaxrs2.resources.EnhancedResponsesResource;
 import io.swagger.v3.jaxrs2.resources.ExternalDocsReference;
 import io.swagger.v3.jaxrs2.resources.MyClass;
 import io.swagger.v3.jaxrs2.resources.MyOtherClass;
+import io.swagger.v3.jaxrs2.resources.RefCallbackResource;
+import io.swagger.v3.jaxrs2.resources.RefExamplesResource;
+import io.swagger.v3.jaxrs2.resources.RefHeaderResource;
+import io.swagger.v3.jaxrs2.resources.RefLinksResource;
+import io.swagger.v3.jaxrs2.resources.RefParameter3029Resource;
+import io.swagger.v3.jaxrs2.resources.RefParameter3074Resource;
+import io.swagger.v3.jaxrs2.resources.RefParameterResource;
+import io.swagger.v3.jaxrs2.resources.RefRequestBodyResource;
 import io.swagger.v3.jaxrs2.resources.RefResponsesResource;
+import io.swagger.v3.jaxrs2.resources.RefSecurityResource;
 import io.swagger.v3.jaxrs2.resources.ResourceWithSubResource;
 import io.swagger.v3.jaxrs2.resources.ResponseContentWithArrayResource;
 import io.swagger.v3.jaxrs2.resources.ResponsesResource;
 import io.swagger.v3.jaxrs2.resources.SecurityResource;
 import io.swagger.v3.jaxrs2.resources.ServersResource;
 import io.swagger.v3.jaxrs2.resources.SimpleCallbackResource;
+import io.swagger.v3.jaxrs2.resources.SimpleExamplesResource;
 import io.swagger.v3.jaxrs2.resources.SimpleMethods;
+import io.swagger.v3.jaxrs2.resources.SimpleParameterResource;
+import io.swagger.v3.jaxrs2.resources.SimpleRequestBodyResource;
 import io.swagger.v3.jaxrs2.resources.SimpleResponsesResource;
 import io.swagger.v3.jaxrs2.resources.SubResourceHead;
 import io.swagger.v3.jaxrs2.resources.TagsResource;
@@ -42,11 +57,15 @@ import io.swagger.v3.jaxrs2.resources.Ticket2793Resource;
 import io.swagger.v3.jaxrs2.resources.Ticket2794Resource;
 import io.swagger.v3.jaxrs2.resources.Ticket2806Resource;
 import io.swagger.v3.jaxrs2.resources.Ticket2818Resource;
+import io.swagger.v3.jaxrs2.resources.Ticket2848Resource;
+import io.swagger.v3.jaxrs2.resources.Ticket3015Resource;
 import io.swagger.v3.jaxrs2.resources.UserAnnotationResource;
 import io.swagger.v3.jaxrs2.resources.extensions.ExtensionsResource;
 import io.swagger.v3.jaxrs2.resources.extensions.OperationExtensionsResource;
 import io.swagger.v3.jaxrs2.resources.extensions.ParameterExtensionsResource;
 import io.swagger.v3.jaxrs2.resources.extensions.RequestBodyExtensionsResource;
+import io.swagger.v3.jaxrs2.resources.rs.ProcessTokenRestService;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.ExternalDocumentation;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -54,10 +73,15 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.Paths;
 import io.swagger.v3.oas.models.callbacks.Callback;
+import io.swagger.v3.oas.models.examples.Example;
+import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.links.Link;
 import io.swagger.v3.oas.models.media.ArraySchema;
+import io.swagger.v3.oas.models.media.IntegerSchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
@@ -76,6 +100,7 @@ import javax.ws.rs.Produces;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -198,9 +223,13 @@ public class ReaderTest {
         assertNotNull(paths);
         Operation firstOperation = paths.get(PATH_REF).getGet();
         Operation secondOperation = paths.get(PATH_2_REF).getGet();
+        Operation thirdOperation = paths.get(PATH_REF).getPost();
         assertNotNull(firstOperation);
         assertNotNull(secondOperation);
+        assertNotNull(thirdOperation);
         assertNotEquals(firstOperation.getOperationId(), secondOperation.getOperationId());
+        assertNotEquals(firstOperation.getOperationId(), thirdOperation.getOperationId());
+        assertNotEquals(secondOperation.getOperationId(), thirdOperation.getOperationId());
     }
 
     @Test(description = "Get a Duplicated Operation Id with same id as method name")
@@ -212,9 +241,15 @@ public class ReaderTest {
         assertNotNull(paths);
         Operation firstOperation = paths.get("/1").getGet();
         Operation secondOperation = paths.get("/2").getGet();
+        Operation secondPostOperation = paths.get("/2").getPost();
+        Operation thirdPostOperation = paths.get("/3").getPost();
         assertNotNull(firstOperation);
         assertNotNull(secondOperation);
+        assertNotNull(secondPostOperation);
+        assertNotNull(thirdPostOperation);
         assertNotEquals(firstOperation.getOperationId(), secondOperation.getOperationId());
+        assertNotEquals(secondOperation.getOperationId(), secondPostOperation.getOperationId());
+        assertNotEquals(secondPostOperation.getOperationId(), thirdPostOperation.getOperationId());
         Operation thirdOperation = paths.get("/3").getGet();
         Operation fourthOperation = paths.get("/4").getGet();
         assertNotNull(thirdOperation);
@@ -385,7 +420,6 @@ public class ReaderTest {
                 "          content:\n" +
                 "            application/json:\n" +
                 "              schema:\n" +
-                "                type: string\n" +
                 "                allOf:\n" +
                 "                - $ref: '#/components/schemas/MultipleSub1Bean'\n" +
                 "                - $ref: '#/components/schemas/MultipleSub2Bean'\n" +
@@ -408,7 +442,6 @@ public class ReaderTest {
                 "          content:\n" +
                 "            application/json:\n" +
                 "              schema:\n" +
-                "                type: string\n" +
                 "                anyOf:\n" +
                 "                - $ref: '#/components/schemas/MultipleSub1Bean'\n" +
                 "                - $ref: '#/components/schemas/MultipleSub2Bean'\n" +
@@ -431,7 +464,6 @@ public class ReaderTest {
                 "          content:\n" +
                 "            application/json:\n" +
                 "              schema:\n" +
-                "                type: string\n" +
                 "                oneOf:\n" +
                 "                - $ref: '#/components/schemas/MultipleSub1Bean'\n" +
                 "                - $ref: '#/components/schemas/MultipleSub2Bean'\n" +
@@ -1220,6 +1252,839 @@ public class ReaderTest {
             return super.filterOperation(operation, api, params, cookies, headers);
         }
     }
+
+    @Test(description = "array schema required property")
+    public void testTicket2848() {
+        Reader reader = new Reader(new OpenAPI());
+
+        OpenAPI openAPI = reader.read(Ticket2848Resource.class);
+        String yaml = "openapi: 3.0.1\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      operationId: getter\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                $ref: '#/components/schemas/Town'\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    Town:\n" +
+                "      required:\n" +
+                "      - streets\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        streets:\n" +
+                "          minItems: 1\n" +
+                "          uniqueItems: true\n" +
+                "          type: array\n" +
+                "          items:\n" +
+                "            type: string\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "RequestBody with ref")
+    public void testRequestBodyWithRef() {
+        Components components = new Components();
+        components.addRequestBodies("User", new RequestBody().description("Test RequestBody"));
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefRequestBodyResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      description: Defines a simple get operation with a payload complex input object\n" +
+                "      operationId: sendPayload\n" +
+                "      requestBody:\n" +
+                "        $ref: '#/components/requestBodies/User'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "      deprecated: true\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    User:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        id:\n" +
+                "          type: integer\n" +
+                "          format: int64\n" +
+                "        username:\n" +
+                "          type: string\n" +
+                "        firstName:\n" +
+                "          type: string\n" +
+                "        lastName:\n" +
+                "          type: string\n" +
+                "        email:\n" +
+                "          type: string\n" +
+                "        password:\n" +
+                "          type: string\n" +
+                "        phone:\n" +
+                "          type: string\n" +
+                "        userStatus:\n" +
+                "          type: integer\n" +
+                "          description: User Status\n" +
+                "          format: int32\n" +
+                "      xml:\n" +
+                "        name: User\n" +
+                "  requestBodies:\n" +
+                "    User:\n" +
+                "      description: Test RequestBody\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "RequestBody with filter")
+    public void testRequestBodyWithFilter() {
+        Components components = new Components();
+        components.addRequestBodies("User", new RequestBody());
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(SimpleRequestBodyResource.class);
+
+        OpenAPISpecFilter filterImpl = new RefRequestBodyFilter();
+        SpecFilter f = new SpecFilter();
+        openAPI = f.filter(openAPI, filterImpl, null, null, null);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      description: Defines a simple get operation with a payload complex input object\n" +
+                "      operationId: sendPayload\n" +
+                "      parameters: []\n" +
+                "      requestBody:\n" +
+                "        $ref: '#/components/requestBodies/User'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "      deprecated: true\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    User:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        id:\n" +
+                "          type: integer\n" +
+                "          format: int64\n" +
+                "        username:\n" +
+                "          type: string\n" +
+                "        firstName:\n" +
+                "          type: string\n" +
+                "        lastName:\n" +
+                "          type: string\n" +
+                "        email:\n" +
+                "          type: string\n" +
+                "        password:\n" +
+                "          type: string\n" +
+                "        phone:\n" +
+                "          type: string\n" +
+                "        userStatus:\n" +
+                "          type: integer\n" +
+                "          description: User Status\n" +
+                "          format: int32\n" +
+                "      xml:\n" +
+                "        name: User\n" +
+                "  requestBodies:\n" +
+                "    User: {}\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    class RefRequestBodyFilter extends AbstractSpecFilter {
+        @Override
+        public Optional<Operation> filterOperation(Operation operation, ApiDescription api, Map<String, List<String>> params,
+                                                   Map<String, String> cookies, Map<String, List<String>> headers) {
+            if ("sendPayload".equals(operation.getOperationId())) {
+                final RequestBody requestBody = new RequestBody();
+                requestBody.set$ref("#/components/requestBodies/User");
+                operation.setRequestBody(requestBody);
+                return Optional.of(operation);
+            }
+            return super.filterOperation(operation, api, params, cookies, headers);
+        }
+    }
+
+    @Test(description = "Parameter with ref")
+    public void testParameterWithRef() {
+        Components components = new Components();
+        components.addParameters("id", new Parameter()
+                .description("Id Description")
+                .schema(new IntegerSchema())
+                .in(ParameterIn.QUERY.toString())
+                .example(1)
+                .required(true));
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefParameterResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      description: Defines a simple get operation with a payload complex input object\n" +
+                "      operationId: sendPayload\n" +
+                "      parameters:\n" +
+                "      - $ref: '#/components/parameters/id'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "      deprecated: true\n" +
+                "components:\n" +
+                "  parameters: \n" +
+                "    id:\n" +
+                "      in: query\n" +
+                "      description: Id Description\n" +
+                "      required: true\n" +
+                "      schema:\n" +
+                "        type: integer\n" +
+                "        format: int32\n" +
+                "      example: 1\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "Responses with filter")
+    public void testParameterWithFilter() {
+        Components components = new Components();
+        components.addParameters("id", new Parameter()
+                .description("Id Description")
+                .schema(new IntegerSchema())
+                .in(ParameterIn.QUERY.toString())
+                .example(1)
+                .required(true));
+
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(SimpleParameterResource.class);
+
+        OpenAPISpecFilter filterImpl = new RefParameterFilter();
+        SpecFilter f = new SpecFilter();
+        openAPI = f.filter(openAPI, filterImpl, null, null, null);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      description: Defines a simple get operation with a payload complex input object\n" +
+                "      operationId: sendPayload\n" +
+                "      parameters:\n" +
+                "      - $ref: '#/components/parameters/id'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "      deprecated: true\n" +
+                "components:\n" +
+                "  parameters: \n" +
+                "    id:\n" +
+                "      in: query\n" +
+                "      description: Id Description\n" +
+                "      required: true\n" +
+                "      schema:\n" +
+                "        type: integer\n" +
+                "        format: int32\n" +
+                "      example: 1\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    class RefParameterFilter extends AbstractSpecFilter {
+        @Override
+        public Optional<Operation> filterOperation(Operation operation, ApiDescription api, Map<String, List<String>> params,
+                                                   Map<String, String> cookies, Map<String, List<String>> headers) {
+            if ("sendPayload".equals(operation.getOperationId())) {
+                final Parameter parameter = new Parameter();
+                parameter.set$ref("#/components/parameters/id");
+                operation.getParameters().clear();
+                operation.addParametersItem(parameter);
+                return Optional.of(operation);
+            }
+            return super.filterOperation(operation, api, params, cookies, headers);
+        }
+    }
+
+    @Test(description = "Example with ref")
+    public void testExampleWithRef() {
+        Components components = new Components();
+        components.addExamples("Id", new Example().description("Id Example").summary("Id Example").value("1"));
+
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefExamplesResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /example:\n" +
+                "    post:\n" +
+                "      description: subscribes a client to updates relevant to the requestor's account\n" +
+                "      operationId: subscribe\n" +
+                "      parameters:\n" +
+                "      - name: subscriptionId\n" +
+                "        in: path\n" +
+                "        required: true\n" +
+                "        style: simple\n" +
+                "        schema:\n" +
+                "          type: string\n" +
+                "          description: Schema\n" +
+                "          example: Subscription example\n" +
+                "        examples:\n" +
+                "          subscriptionId_1:\n" +
+                "            summary: Subscription number 12345\n" +
+                "            description: subscriptionId_1\n" +
+                "            value: 12345\n" +
+                "            externalValue: Subscription external value 1\n" +
+                "            $ref: '#/components/examples/Id'\n" +
+                "        example: example\n" +
+                "      requestBody:\n" +
+                "        content:\n" +
+                "          '*/*':\n" +
+                "            schema:\n" +
+                "              type: integer\n" +
+                "              format: int32\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                $ref: '#/components/schemas/SubscriptionResponse'\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    SubscriptionResponse:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        subscriptionId:\n" +
+                "          type: string\n" +
+                "  examples:\n" +
+                "    Id:\n" +
+                "      summary: Id Example\n" +
+                "      description: Id Example\n" +
+                "      value: \"1\"\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "Example with Ref Filter")
+    public void testExampleWithFilter() {
+        Components components = new Components();
+        components.addExamples("Id", new Example().description("Id Example").summary("Id Example").value("1"));
+
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(SimpleExamplesResource.class);
+
+        OpenAPISpecFilter filterImpl = new RefExampleFilter();
+        SpecFilter f = new SpecFilter();
+        openAPI = f.filter(openAPI, filterImpl, null, null, null);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /example:\n" +
+                "    post:\n" +
+                "      description: subscribes a client to updates relevant to the requestor's account\n" +
+                "      operationId: subscribe\n" +
+                "      parameters:\n" +
+                "      - example:\n" +
+                "          $ref: '#/components/examples/Id'\n" +
+                "      requestBody:\n" +
+                "        content:\n" +
+                "          '*/*':\n" +
+                "            schema:\n" +
+                "              type: integer\n" +
+                "              format: int32\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                $ref: '#/components/schemas/SubscriptionResponse'\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    SubscriptionResponse:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        subscriptionId:\n" +
+                "          type: string\n" +
+                "  examples:\n" +
+                "    Id:\n" +
+                "      summary: Id Example\n" +
+                "      description: Id Example\n" +
+                "      value: \"1\"\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    class RefExampleFilter extends AbstractSpecFilter {
+        @Override
+        public Optional<Operation> filterOperation(Operation operation, ApiDescription api, Map<String, List<String>> params,
+                                                   Map<String, String> cookies, Map<String, List<String>> headers) {
+            if ("subscribe".equals(operation.getOperationId())) {
+                final Parameter parameter = new Parameter();
+                parameter.setExample(new Example().$ref("#/components/examples/Id"));
+                operation.getParameters().clear();
+                operation.addParametersItem(parameter);
+                return Optional.of(operation);
+            }
+            return super.filterOperation(operation, api, params, cookies, headers);
+        }
+    }
+
+    @Test(description = "Header with Ref")
+    public void testHeaderWithRef() {
+        Components components = new Components();
+        components.addHeaders("Header", new Header().description("Header Description"));
+
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefHeaderResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /path:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      description: Defines a simple get operation with no inputs and a complex output\n" +
+                "      operationId: getWithPayloadResponse\n" +
+                "      responses:\n" +
+                "        200:\n" +
+                "          description: voila!\n" +
+                "          headers:\n" +
+                "            Rate-Limit-Limit:\n" +
+                "              description: The number of allowed requests in the current period\n" +
+                "              $ref: '#/components/headers/Header'\n" +
+                "              style: simple\n" +
+                "              schema:\n" +
+                "                type: integer\n" +
+                "      deprecated: true\n" +
+                "components:\n" +
+                "  headers:\n" +
+                "    Header:\n" +
+                "      description: Header Description\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "SecurityScheme with REf")
+    public void testSecuritySchemeWithRef() {
+        Components components = new Components();
+        components.addSecuritySchemes("Security", new SecurityScheme().description("Security Example").
+                name("Security").type(SecurityScheme.Type.OAUTH2).$ref("myOauth2Security").in(SecurityScheme.In.HEADER));
+
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefSecurityResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /:\n" +
+                "    get:\n" +
+                "      description: description\n" +
+                "      operationId: Operation Id\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "      security:\n" +
+                "      - security_key:\n" +
+                "        - write:pets\n" +
+                "        - read:pets\n" +
+                "components:\n" +
+                "  securitySchemes:\n" +
+                "    Security:\n" +
+                "      type: oauth2\n" +
+                "      description: Security Example\n" +
+                "    myOauth2Security:\n" +
+                "      type: oauth2\n" +
+                "      description: myOauthSecurity Description\n" +
+                "      $ref: '#/components/securitySchemes/Security'\n" +
+                "      in: header\n" +
+                "      flows:\n" +
+                "        implicit:\n" +
+                "          authorizationUrl: http://x.com\n" +
+                "          scopes:\n" +
+                "            write:pets: modify pets in your account\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "Link with Ref")
+    public void testLinkWithRef() {
+        Components components = new Components();
+        components.addLinks("Link", new Link().description("Link Description").operationId("id"));
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefLinksResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /links:\n" +
+                "    get:\n" +
+                "      operationId: getUserWithAddress\n" +
+                "      parameters:\n" +
+                "      - name: userId\n" +
+                "        in: query\n" +
+                "        schema:\n" +
+                "          type: string\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: test description\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                $ref: '#/components/schemas/User'\n" +
+                "          links:\n" +
+                "            address:\n" +
+                "              operationId: getAddress\n" +
+                "              parameters:\n" +
+                "                userId: $request.query.userId\n" +
+                "              $ref: '#/components/links/Link'\n" +
+                "components:\n" +
+                "  links:\n" +
+                "    Link:\n" +
+                "      operationId: id\n" +
+                "      description: Link Description\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "Callback with Ref")
+    public void testCallbackWithRef() {
+        Components components = new Components();
+        components.addCallbacks("Callback", new Callback().addPathItem("/post", new PathItem().description("Post Path Item")));
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefCallbackResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /simplecallback:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      operationId: getWithNoParameters\n" +
+                "      responses:\n" +
+                "        200:\n" +
+                "          description: voila!\n" +
+                "      callbacks:\n" +
+                "        testCallback1:\n" +
+                "          $ref: '#/components/callbacks/Callback'\n" +
+                "components:\n" +
+                "  callbacks:\n" +
+                "    Callback:\n" +
+                "      /post:\n" +
+                "        description: Post Path Item\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test
+    public void testTicket3015() {
+        Reader reader = new Reader(new OpenAPI());
+
+        OpenAPI openAPI = reader.read(Ticket3015Resource.class);
+        String yaml = "openapi: 3.0.1\n" +
+                "paths:\n" +
+                "  /test/test:\n" +
+                "    get:\n" +
+                "      operationId: schemaImpl\n" +
+                "      responses:\n" +
+                "        200:\n" +
+                "          description: OK\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                type: string\n" +
+                "                format: uri\n" +
+                "        400:\n" +
+                "          description: Bad Request\n" +
+                "        500:\n" +
+                "          description: Internal Server Error\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+        PrimitiveType.customExcludedClasses().add(URI.class.getName());
+        openAPI = reader.read(Ticket3015Resource.class);
+        yaml = "openapi: 3.0.1\n" +
+                "paths:\n" +
+                "  /test/test:\n" +
+                "    get:\n" +
+                "      operationId: schemaImpl_1\n" +
+                "      responses:\n" +
+                "        200:\n" +
+                "          description: OK\n" +
+                "          content:\n" +
+                "            '*/*':\n" +
+                "              schema:\n" +
+                "                type: object\n" +
+                "                properties:\n" +
+                "                  scheme:\n" +
+                "                    type: string\n" +
+                "                  fragment:\n" +
+                "                    type: string\n" +
+                "                  authority:\n" +
+                "                    type: string\n" +
+                "                  userInfo:\n" +
+                "                    type: string\n" +
+                "                  host:\n" +
+                "                    type: string\n" +
+                "                  port:\n" +
+                "                    type: integer\n" +
+                "                    format: int32\n" +
+                "                  path:\n" +
+                "                    type: string\n" +
+                "                  query:\n" +
+                "                    type: string\n" +
+                "                  schemeSpecificPart:\n" +
+                "                    type: string\n" +
+                "                  rawSchemeSpecificPart:\n" +
+                "                    type: string\n" +
+                "                  rawAuthority:\n" +
+                "                    type: string\n" +
+                "                  rawUserInfo:\n" +
+                "                    type: string\n" +
+                "                  rawPath:\n" +
+                "                    type: string\n" +
+                "                  rawQuery:\n" +
+                "                    type: string\n" +
+                "                  rawFragment:\n" +
+                "                    type: string\n" +
+                "                  absolute:\n" +
+                "                    type: boolean\n" +
+                "                  opaque:\n" +
+                "                    type: boolean\n" +
+                "        400:\n" +
+                "          description: Bad Request\n" +
+                "        500:\n" +
+                "          description: Internal Server Error\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+        PrimitiveType.customExcludedClasses().remove(URI.class.getName());
+    }
+
+
+    @Test(description = "Parameter with ref")
+    public void testTicket3029() {
+        Components components = new Components();
+        components.addParameters("id", new Parameter()
+                .description("Id Description")
+                .schema(new IntegerSchema())
+                .in(ParameterIn.QUERY.toString())
+                .example(1)
+                .required(true));
+        OpenAPI oas = new OpenAPI()
+                .info(new Info().description("info"))
+                .components(components);
+
+        Reader reader = new Reader(oas);
+        OpenAPI openAPI = reader.read(RefParameter3029Resource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "info:\n" +
+                "  description: info\n" +
+                "paths:\n" +
+                "  /2:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      operationId: sendPayload2\n" +
+                "      parameters:\n" +
+                "      - $ref: '#/components/parameters/id'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "  /1:\n" +
+                "    get:\n" +
+                "      summary: Simple get operation\n" +
+                "      operationId: sendPayload1\n" +
+                "      parameters:\n" +
+                "      - $ref: '#/components/parameters/id'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "components:\n" +
+                "  parameters:\n" +
+                "    id:\n" +
+                "      in: query\n" +
+                "      description: Id Description\n" +
+                "      required: true\n" +
+                "      schema:\n" +
+                "        type: integer\n" +
+                "        format: int32\n" +
+                "      example: 1\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
+    @Test(description = "response generic subclass")
+    public void testTicket3082() {
+        Reader reader = new Reader(new OpenAPI());
+        OpenAPI openAPI = reader.read(ProcessTokenRestService.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "paths:\n" +
+                "  /token:\n" +
+                "    post:\n" +
+                "      operationId: create\n" +
+                "      requestBody:\n" +
+                "        content:\n" +
+                "          application/json:\n" +
+                "            schema:\n" +
+                "              $ref: '#/components/schemas/ProcessTokenDTO'\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            application/json:\n" +
+                "              schema:\n" +
+                "                $ref: '#/components/schemas/ProcessTokenDTO'\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    ProcessTokenDTO:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        guid:\n" +
+                "          type: string\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+    
+    @Test(description = "Filter class return type")
+    public void testTicket3074() {
+        Reader reader = new Reader(new OpenAPI());
+        OpenAPI oasResult = reader.read(RefParameter3074Resource.class);
+        SerializationMatchers.assertEqualsToYaml(oasResult, RefParameter3074Resource.EXPECTED_YAML_WITH_WRAPPER);
+
+        ModelConverters.getInstance().addClassToSkip("io.swagger.v3.jaxrs2.resources.RefParameter3074Resource$Wrapper");
+
+        reader = new Reader(new OpenAPI());
+        oasResult = reader.read(RefParameter3074Resource.class);
+        SerializationMatchers.assertEqualsToYaml(oasResult, RefParameter3074Resource.EXPECTED_YAML_WITHOUT_WRAPPER);
+    }
+
+
+    @Test(description = "Single Example")
+    public void testSingleExample() {
+
+        Reader reader = new Reader(new OpenAPI());
+        OpenAPI openAPI = reader.read(SingleExampleResource.class);
+
+        String yaml = "openapi: 3.0.1\n" +
+                "paths:\n" +
+                "  /test1:\n" +
+                "    post:\n" +
+                "      operationId: test1\n" +
+                "      requestBody:\n" +
+                "        content:\n" +
+                "          application/json:\n" +
+                "            schema:\n" +
+                "              $ref: '#/components/schemas/User'\n" +
+                "            example:\n" +
+                "              foo: foo\n" +
+                "              bar: bar\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "  /test2:\n" +
+                "    post:\n" +
+                "      operationId: test2\n" +
+                "      requestBody:\n" +
+                "        content:\n" +
+                "          application/json:\n" +
+                "            schema:\n" +
+                "              $ref: '#/components/schemas/User'\n" +
+                "            example:\n" +
+                "              foo: foo\n" +
+                "              bar: bar\n" +
+                "      responses:\n" +
+                "        default:\n" +
+                "          description: default response\n" +
+                "          content:\n" +
+                "            '*/*': {}\n" +
+                "components:\n" +
+                "  schemas:\n" +
+                "    User:\n" +
+                "      type: object\n" +
+                "      properties:\n" +
+                "        id:\n" +
+                "          type: integer\n" +
+                "          format: int64\n" +
+                "        username:\n" +
+                "          type: string\n" +
+                "        firstName:\n" +
+                "          type: string\n" +
+                "        lastName:\n" +
+                "          type: string\n" +
+                "        email:\n" +
+                "          type: string\n" +
+                "        password:\n" +
+                "          type: string\n" +
+                "        phone:\n" +
+                "          type: string\n" +
+                "        userStatus:\n" +
+                "          type: integer\n" +
+                "          description: User Status\n" +
+                "          format: int32\n" +
+                "      xml:\n" +
+                "        name: User\n";
+        SerializationMatchers.assertEqualsToYaml(openAPI, yaml);
+    }
+
 }
-
-

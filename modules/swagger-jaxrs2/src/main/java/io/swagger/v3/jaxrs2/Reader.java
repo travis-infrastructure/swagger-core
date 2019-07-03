@@ -198,7 +198,13 @@ public class Reader implements OpenApiReader {
 
     protected String resolveApplicationPath() {
         if (application != null) {
-            ApplicationPath applicationPath = application.getClass().getAnnotation(ApplicationPath.class);
+            Class<?> applicationToScan = this.application.getClass();
+            ApplicationPath applicationPath;
+            //search up in the hierarchy until we find one with the annotation, this is needed because for example Weld proxies will not have the annotation and the right class will be the superClass
+            while ((applicationPath = applicationToScan.getAnnotation(ApplicationPath.class)) == null && !applicationToScan.getSuperclass().equals(Application.class)) {
+                applicationToScan = applicationToScan.getSuperclass();
+            }
+
             if (applicationPath != null) {
                 if (StringUtils.isNotBlank(applicationPath.value())) {
                     return applicationPath.value();
@@ -407,17 +413,39 @@ public class Reader implements OpenApiReader {
                     continue;
                 } else if (StringUtils.isBlank(httpMethod) && subResource != null) {
                     Type returnType = method.getGenericReturnType();
-                    if (shouldIgnoreClass(returnType.getTypeName()) && !returnType.equals(subResource)) {
+                    if (annotatedMethod != null && annotatedMethod.getType() != null) {
+                        returnType = annotatedMethod.getType();
+                    }
+
+                    if (shouldIgnoreClass(returnType.getTypeName()) && !method.getGenericReturnType().equals(subResource)) {
                         continue;
                     }
                 }
 
                 io.swagger.v3.oas.annotations.Operation apiOperation = ReflectionUtils.getAnnotation(method, io.swagger.v3.oas.annotations.Operation.class);
-                JsonView jsonViewAnnotation = ReflectionUtils.getAnnotation(method, JsonView.class);
+                JsonView jsonViewAnnotation;
+                JsonView jsonViewAnnotationForRequestBody;
                 if (apiOperation != null && apiOperation.ignoreJsonView()) {
                     jsonViewAnnotation = null;
+                    jsonViewAnnotationForRequestBody = null;
+                } else {
+                    jsonViewAnnotation = ReflectionUtils.getAnnotation(method, JsonView.class);
+                    /* If one and only one exists, use the @JsonView annotation from the method parameter annotated
+                       with @RequestBody. Otherwise fall back to the @JsonView annotation for the method itself. */
+                    jsonViewAnnotationForRequestBody = (JsonView) Arrays.stream(ReflectionUtils.getParameterAnnotations(method))
+                        .filter(arr ->
+                            Arrays.stream(arr)
+                                .anyMatch(annotation ->
+                                    annotation.annotationType()
+                                        .equals(io.swagger.v3.oas.annotations.parameters.RequestBody.class)
+                                )
+                        ).flatMap(Arrays::stream)
+                        .filter(annotation ->
+                            annotation.annotationType()
+                                .equals(JsonView.class)
+                        ).reduce((a, b) -> null)
+                        .orElse(jsonViewAnnotation);
                 }
-
 
                 Operation operation = parseMethod(
                         method,
@@ -434,8 +462,8 @@ public class Reader implements OpenApiReader {
                         parentRequestBody,
                         parentResponses,
                         jsonViewAnnotation,
-                        classResponses
-                        );
+                        classResponses,
+                        annotatedMethod);
                 if (operation != null) {
 
                     List<Parameter> operationParameters = new ArrayList<>();
@@ -455,9 +483,9 @@ public class Reader implements OpenApiReader {
                                 }
                             }
                             ResolvedParameter resolvedParameter = getParameters(paramType, Arrays.asList(paramAnnotations[i]), operation, classConsumes, methodConsumes, jsonViewAnnotation);
-                            for (Parameter p : resolvedParameter.parameters) {
-                                operationParameters.add(p);
-                            }
+                            operationParameters.addAll(resolvedParameter.parameters);
+                            // collect params to use together as request Body
+                            formParameters.addAll(resolvedParameter.formParameters);
                             if (resolvedParameter.requestBody != null) {
                                 processRequestBody(
                                         resolvedParameter.requestBody,
@@ -467,10 +495,7 @@ public class Reader implements OpenApiReader {
                                         operationParameters,
                                         paramAnnotations[i],
                                         type,
-                                        jsonViewAnnotation);
-                            } else if (resolvedParameter.formParameter != null) {
-                                // collect params to use together as request Body
-                                formParameters.add(resolvedParameter.formParameter);
+                                        jsonViewAnnotationForRequestBody);
                             }
                         }
                     } else {
@@ -487,9 +512,9 @@ public class Reader implements OpenApiReader {
                                 }
                             }
                             ResolvedParameter resolvedParameter = getParameters(paramType, Arrays.asList(paramAnnotations[i]), operation, classConsumes, methodConsumes, jsonViewAnnotation);
-                            for (Parameter p : resolvedParameter.parameters) {
-                                operationParameters.add(p);
-                            }
+                            operationParameters.addAll(resolvedParameter.parameters);
+                            // collect params to use together as request Body
+                            formParameters.addAll(resolvedParameter.formParameters);
                             if (resolvedParameter.requestBody != null) {
                                 processRequestBody(
                                         resolvedParameter.requestBody,
@@ -499,10 +524,7 @@ public class Reader implements OpenApiReader {
                                         operationParameters,
                                         paramAnnotations[i],
                                         type,
-                                        jsonViewAnnotation);
-                            } else if (resolvedParameter.formParameter != null) {
-                                // collect params to use together as request Body
-                                formParameters.add(resolvedParameter.formParameter);
+                                        jsonViewAnnotationForRequestBody);
                             }
                         }
                     }
@@ -511,6 +533,9 @@ public class Reader implements OpenApiReader {
                         Schema mergedSchema = new ObjectSchema();
                         for (Parameter formParam: formParameters) {
                             mergedSchema.addProperties(formParam.getName(), formParam.getSchema());
+                            if (null != formParam.getRequired() && formParam.getRequired()) {
+                                mergedSchema.addRequiredItem(formParam.getName());
+                            }
                         }
                         Parameter merged = new Parameter().schema(mergedSchema);
                         processRequestBody(
@@ -521,7 +546,7 @@ public class Reader implements OpenApiReader {
                                 operationParameters,
                                 new Annotation[0],
                                 null,
-                                jsonViewAnnotation);
+                                jsonViewAnnotationForRequestBody);
 
                     }
                     if (operationParameters.size() > 0) {
@@ -731,6 +756,7 @@ public class Reader implements OpenApiReader {
                 null,
                 null,
                 jsonViewAnnotation,
+                null,
                 null);
     }
 
@@ -767,10 +793,49 @@ public class Reader implements OpenApiReader {
                 parentRequestBody,
                 parentResponses,
                 jsonViewAnnotation,
-                classResponses);
+                classResponses,
+                null);
     }
 
-    private Operation parseMethod(
+    public Operation parseMethod(
+            Method method,
+            List<Parameter> globalParameters,
+            Produces methodProduces,
+            Produces classProduces,
+            Consumes methodConsumes,
+            Consumes classConsumes,
+            List<SecurityRequirement> classSecurityRequirements,
+            Optional<io.swagger.v3.oas.models.ExternalDocumentation> classExternalDocs,
+            Set<String> classTags,
+            List<io.swagger.v3.oas.models.servers.Server> classServers,
+            boolean isSubresource,
+            RequestBody parentRequestBody,
+            ApiResponses parentResponses,
+            JsonView jsonViewAnnotation,
+            io.swagger.v3.oas.annotations.responses.ApiResponse[] classResponses,
+            AnnotatedMethod annotatedMethod) {
+        JavaType classType = TypeFactory.defaultInstance().constructType(method.getDeclaringClass());
+        return parseMethod(
+                classType.getClass(),
+                method,
+                globalParameters,
+                methodProduces,
+                classProduces,
+                methodConsumes,
+                classConsumes,
+                classSecurityRequirements,
+                classExternalDocs,
+                classTags,
+                classServers,
+                isSubresource,
+                parentRequestBody,
+                parentResponses,
+                jsonViewAnnotation,
+                classResponses,
+                annotatedMethod);
+    }
+
+    protected Operation parseMethod(
             Class<?> cls,
             Method method,
             List<Parameter> globalParameters,
@@ -786,7 +851,8 @@ public class Reader implements OpenApiReader {
             RequestBody parentRequestBody,
             ApiResponses parentResponses,
             JsonView jsonViewAnnotation,
-            io.swagger.v3.oas.annotations.responses.ApiResponse[] classResponses) {
+            io.swagger.v3.oas.annotations.responses.ApiResponse[] classResponses,
+            AnnotatedMethod annotatedMethod) {
         Operation operation = new Operation();
 
         io.swagger.v3.oas.annotations.Operation apiOperation = ReflectionUtils.getAnnotation(method, io.swagger.v3.oas.annotations.Operation.class);
@@ -944,8 +1010,13 @@ public class Reader implements OpenApiReader {
 
         // handle return type, add as response in case.
         Type returnType = method.getGenericReturnType();
+
+        if (annotatedMethod != null && annotatedMethod.getType() != null) {
+            returnType = annotatedMethod.getType();
+        }
+
         final Class<?> subResource = getSubResourceWithJaxRsSubresourceLocatorSpecs(method);
-        if (!shouldIgnoreClass(returnType.getTypeName()) && !returnType.equals(subResource)) {
+        if (!shouldIgnoreClass(returnType.getTypeName()) && !method.getGenericReturnType().equals(subResource)) {
             ResolvedSchema resolvedSchema = ModelConverters.getInstance().resolveAsResolvedSchema(new AnnotatedType(returnType).resolveAsRef(true).jsonViewAnnotation(jsonViewAnnotation));
             if (resolvedSchema.schema != null) {
                 Schema returnTypeSchema = resolvedSchema.schema;
@@ -998,8 +1069,14 @@ public class Reader implements OpenApiReader {
             return true;
         }
         boolean ignore = false;
-        ignore = ignore || className.startsWith("javax.ws.rs.");
-        ignore = ignore || className.equalsIgnoreCase("void");
+        String rawClassName = className;
+        if (rawClassName.startsWith("[")) { // jackson JavaType
+            rawClassName = className.replace("[simple type, class ", "");
+            rawClassName = rawClassName.substring(0, rawClassName.length() -1);
+        }
+        ignore = ignore || rawClassName.startsWith("javax.ws.rs.");
+        ignore = ignore || rawClassName.equalsIgnoreCase("void");
+        ignore = ignore || ModelConverters.getInstance().isRegisteredAsSkippedClass(rawClassName);
         return ignore;
     }
 
@@ -1014,7 +1091,13 @@ public class Reader implements OpenApiReader {
         if (apiCallback == null) {
             return callbackMap;
         }
+
         Callback callbackObject = new Callback();
+        if (StringUtils.isNotBlank(apiCallback.ref())) {
+            callbackObject.set$ref(apiCallback.ref());
+            callbackMap.put(apiCallback.name(), callbackObject);
+            return callbackMap;
+        }
         PathItem pathItemObject = new PathItem();
         for (io.swagger.v3.oas.annotations.Operation callbackOperation : apiCallback.operation()) {
             Operation callbackNewOperation = new Operation();
@@ -1161,11 +1244,10 @@ public class Reader implements OpenApiReader {
             return false;
         }
         for (PathItem path : openAPI.getPaths().values()) {
-            String pathOperationId = extractOperationIdFromPathItem(path);
-            if (operationId.equalsIgnoreCase(pathOperationId)) {
+            Set<String> pathOperationIds = extractOperationIdFromPathItem(path);
+            if (pathOperationIds.contains(operationId)) {
                 return true;
             }
-
         }
         return false;
     }
@@ -1201,23 +1283,30 @@ public class Reader implements OpenApiReader {
         return extractParametersResult;
     }
 
-    private String extractOperationIdFromPathItem(PathItem path) {
-        if (path.getGet() != null) {
-            return path.getGet().getOperationId();
-        } else if (path.getPost() != null) {
-            return path.getPost().getOperationId();
-        } else if (path.getPut() != null) {
-            return path.getPut().getOperationId();
-        } else if (path.getDelete() != null) {
-            return path.getDelete().getOperationId();
-        } else if (path.getOptions() != null) {
-            return path.getOptions().getOperationId();
-        } else if (path.getHead() != null) {
-            return path.getHead().getOperationId();
-        } else if (path.getPatch() != null) {
-            return path.getPatch().getOperationId();
+    private Set<String> extractOperationIdFromPathItem(PathItem path) {
+        Set<String> ids = new HashSet<>();
+        if (path.getGet() != null && StringUtils.isNotBlank(path.getGet().getOperationId())) {
+            ids.add(path.getGet().getOperationId());
         }
-        return "";
+        if (path.getPost() != null && StringUtils.isNotBlank(path.getPost().getOperationId())) {
+            ids.add(path.getPost().getOperationId());
+        }
+        if (path.getPut() != null && StringUtils.isNotBlank(path.getPut().getOperationId())) {
+            ids.add(path.getPut().getOperationId());
+        }
+        if (path.getDelete() != null && StringUtils.isNotBlank(path.getDelete().getOperationId())) {
+            ids.add(path.getDelete().getOperationId());
+        }
+        if (path.getOptions() != null && StringUtils.isNotBlank(path.getOptions().getOperationId())) {
+            ids.add(path.getOptions().getOperationId());
+        }
+        if (path.getHead() != null && StringUtils.isNotBlank(path.getHead().getOperationId())) {
+            ids.add(path.getHead().getOperationId());
+        }
+        if (path.getPatch() != null && StringUtils.isNotBlank(path.getPatch().getOperationId())) {
+            ids.add(path.getPatch().getOperationId());
+        }
+        return ids;
     }
 
     private boolean isEmptyComponents(Components components) {

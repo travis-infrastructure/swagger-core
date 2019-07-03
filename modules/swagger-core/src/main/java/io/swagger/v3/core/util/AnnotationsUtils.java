@@ -300,39 +300,64 @@ public abstract class AnnotationsUtils {
     }
 
     public static Optional<Example> getExample(ExampleObject example) {
+        return getExample(example, false);
+    }
+
+    public static Optional<Example> getExample(ExampleObject example, boolean ignoreName) {
         if (example == null) {
             return Optional.empty();
         }
-        if (StringUtils.isNotBlank(example.name())) {
-            Example exampleObject = new Example();
+        Example exampleObject = new Example();
+        if (!ignoreName && StringUtils.isNotBlank(example.name())) {
+
             if (StringUtils.isNotBlank(example.name())) {
                 exampleObject.setDescription(example.name());
             }
-            if (StringUtils.isNotBlank(example.summary())) {
-                exampleObject.setSummary(example.summary());
-            }
-            if (StringUtils.isNotBlank(example.externalValue())) {
-                exampleObject.setExternalValue(example.externalValue());
-            }
-            if (StringUtils.isNotBlank(example.value())) {
-                try {
-                    exampleObject.setValue(Json.mapper().readTree(example.value()));
-                } catch (IOException e) {
-                    exampleObject.setValue(example.value());
-                }
-            }
-            if (example.extensions().length > 0) {
-                Map<String, Object> extensions = AnnotationsUtils.getExtensions(example.extensions());
-                if (extensions != null) {
-                    for (String ext : extensions.keySet()) {
-                        exampleObject.addExtension(ext, extensions.get(ext));
-                    }
-                }
-            }
+            resolveExample(exampleObject, example);
 
             return Optional.of(exampleObject);
+        } else if (ignoreName){
+            if (resolveExample(exampleObject, example)) {
+                return Optional.of(exampleObject);
+            }
         }
         return Optional.empty();
+    }
+
+    private static boolean resolveExample(Example exampleObject, ExampleObject example) {
+
+        boolean isEmpty = true;
+        if (StringUtils.isNotBlank(example.summary())) {
+            isEmpty = false;
+            exampleObject.setSummary(example.summary());
+        }
+
+        if (StringUtils.isNotBlank(example.externalValue())) {
+            isEmpty = false;
+            exampleObject.setExternalValue(example.externalValue());
+        }
+        if (StringUtils.isNotBlank(example.value())) {
+            isEmpty = false;
+            try {
+                exampleObject.setValue(Json.mapper().readTree(example.value()));
+            } catch (IOException e) {
+                exampleObject.setValue(example.value());
+            }
+        }
+        if (StringUtils.isNotBlank(example.ref())) {
+            isEmpty = false;
+            exampleObject.set$ref(example.ref());
+        }
+        if (example.extensions().length > 0) {
+            isEmpty = false;
+            Map<String, Object> extensions = AnnotationsUtils.getExtensions(example.extensions());
+            if (extensions != null) {
+                for (String ext : extensions.keySet()) {
+                    exampleObject.addExtension(ext, extensions.get(ext));
+                }
+            }
+        }
+        return !isEmpty;
     }
 
     public static Optional<ArraySchema> getArraySchema(io.swagger.v3.oas.annotations.media.ArraySchema arraySchema, JsonView jsonViewAnnotation) {
@@ -632,7 +657,9 @@ public abstract class AnnotationsUtils {
                 serverVariableObject.setDefault(serverVariable.defaultValue());
             }
             if (serverVariable.allowableValues() != null && serverVariable.allowableValues().length > 0) {
-                serverVariableObject.setEnum(Arrays.asList(serverVariable.allowableValues()));
+                if (StringUtils.isNotBlank(serverVariable.allowableValues()[0])) {
+                    serverVariableObject.setEnum(Arrays.asList(serverVariable.allowableValues()));
+                }
             }
             if (serverVariable.extensions() != null && serverVariable.extensions().length > 0) {
                 Map<String, Object> extensions = AnnotationsUtils.getExtensions(serverVariable.extensions());
@@ -815,6 +842,10 @@ public abstract class AnnotationsUtils {
                 isEmpty = false;
             }
         }
+        if (StringUtils.isNotBlank(link.ref())) {
+            linkObject.set$ref(link.ref());
+            isEmpty = false;
+        }
         if (link.extensions() != null && link.extensions().length > 0) {
             Map<String, Object> extensions = AnnotationsUtils.getExtensions(link.extensions());
             if (extensions != null) {
@@ -830,6 +861,20 @@ public abstract class AnnotationsUtils {
         Map<String, String> linkParameters = getLinkParameters(link.parameters());
         if (linkParameters.size() > 0) {
             linkObject.setParameters(linkParameters);
+        }
+
+        if (StringUtils.isNotBlank(link.requestBody())) {
+            JsonNode processedValue = null;
+            try {
+                processedValue = Json.mapper().readTree(link.requestBody());
+            } catch (Exception e) {
+                // not a json string
+            }
+            if (processedValue == null) {
+                linkObject.requestBody(link.requestBody());
+            } else {
+                linkObject.requestBody(processedValue);
+            }
         }
         return Optional.of(linkObject);
     }
@@ -872,9 +917,13 @@ public abstract class AnnotationsUtils {
         }
 
         Header headerObject = new Header();
-        boolean isEmpty = true;
+        boolean isEmpty = !StringUtils.isNotBlank(header.name());
         if (StringUtils.isNotBlank(header.description())) {
             headerObject.setDescription(header.description());
+            isEmpty = false;
+        }
+        if (StringUtils.isNotBlank(header.ref())) {
+            headerObject.set$ref(header.ref());
             isEmpty = false;
         }
         if (header.deprecated()) {
@@ -1010,8 +1059,12 @@ public abstract class AnnotationsUtils {
             }
 
             ExampleObject[] examples = annotationContent.examples();
-            for (ExampleObject example : examples) {
-                getExample(example).ifPresent(exampleObject -> mediaType.addExamples(example.name(), exampleObject));
+            if (examples.length == 1 && StringUtils.isBlank(examples[0].name())) {
+                getExample(examples[0], true).ifPresent(exampleObject -> mediaType.example(exampleObject.getValue()));
+            } else {
+                for (ExampleObject example : examples) {
+                    getExample(example).ifPresent(exampleObject -> mediaType.addExamples(example.name(), exampleObject));
+                }
             }
             if (annotationContent.extensions() != null && annotationContent.extensions().length > 0) {
                 Map<String, Object> extensions = AnnotationsUtils.getExtensions(annotationContent.extensions());
@@ -1069,8 +1122,10 @@ public abstract class AnnotationsUtils {
                     schemaMap.forEach((key, schema) -> {
                         components.addSchemas(key, schema);
                     });
-                    if (resolvedSchema.schema != null) {
+                    if (resolvedSchema.schema != null && StringUtils.isNotBlank(resolvedSchema.schema.getName())) {
                         schemaObject.set$ref(COMPONENTS_REF + resolvedSchema.schema.getName());
+                    } else if (resolvedSchema.schema != null){
+                        schemaObject = resolvedSchema.schema;
                     }
                 }
             }
@@ -1093,7 +1148,7 @@ public abstract class AnnotationsUtils {
         } else {
             Optional<Schema> schemaFromAnnotation = AnnotationsUtils.getSchemaFromAnnotation(schemaAnnotation, components, jsonViewAnnotation);
             if (schemaFromAnnotation.isPresent()) {
-                if (StringUtils.isBlank(schemaFromAnnotation.get().get$ref()) && StringUtils.isBlank(schemaFromAnnotation.get().getType())) {
+                if (StringUtils.isBlank(schemaFromAnnotation.get().get$ref()) && StringUtils.isBlank(schemaFromAnnotation.get().getType()) && !(schemaFromAnnotation.get() instanceof ComposedSchema)) {
                     // default to string
                     schemaFromAnnotation.get().setType("string");
                 }
